@@ -904,26 +904,20 @@ def _source_web_dir(home: Path) -> Path | None:
     return None
 
 
-def _ensure_web_dependencies(source: Path, npm: str) -> None:
-    """Install ``web/node_modules`` on a source checkout that has none.
+def _ensure_web_dependencies(
+    source: Path,
+    npm: str | None = None,
+    *,
+    force: bool = False,
+    skip: bool = False,
+) -> None:
+    """Ensure ``web/node_modules`` are installed on a source checkout.
 
-    ``pip install -e ".[cli]"`` never touches npm, so a fresh clone would hand
-    the dev server a missing ``next`` binary and die on Node's MODULE_NOT_FOUND
-    (#709). Prefer ``npm ci`` — reproducible and faster — and fall back to
-    ``npm install`` when the checkout has no lockfile. Output is left on the
-    terminal so a failing install explains itself. No-op once installed, which
-    keeps it cheap on the launcher's repeated resolve path.
+    Delegates to ``deeptutor.runtime.frontend_installer.ensure_frontend_dependencies``.
     """
-    if (source / "node_modules").exists():
-        return
-    action = "ci" if (source / "package-lock.json").exists() else "install"
-    _log(f"web/node_modules not found — running `npm {action}` in {source} ...")
-    result = subprocess.run([npm, action], cwd=source, **_no_window_kwargs())
-    if result.returncode != 0:
-        raise SystemExit(
-            f"`npm {action}` failed (exit {result.returncode}). "
-            "Fix the error above, then retry `deeptutor start`."
-        )
+    from deeptutor.runtime.frontend_installer import ensure_frontend_dependencies
+
+    ensure_frontend_dependencies(source, npm=npm, force=force, skip=skip)
 
 
 def _source_production_env(*, api_base: str, auth_enabled: bool) -> dict[str, str]:
@@ -1061,6 +1055,8 @@ def _resolve_frontend(
     api_base: str,
     auth_enabled: bool,
     dev: bool = False,
+    skip_frontend_install: bool = False,
+    install_frontend: bool = False,
 ) -> FrontendRuntime:
     packaged = _packaged_web_dir()
     node = shutil.which("node")
@@ -1077,12 +1073,14 @@ def _resolve_frontend(
 
     source = _source_web_dir(home)
     if source is not None:
-        npm = shutil.which("npm")
-        if not npm:
-            raise SystemExit(
-                "npm not found. Source installs require Node.js/npm and `cd web && npm install`."
-            )
-        _ensure_web_dependencies(source, npm)
+        from deeptutor.runtime.frontend_installer import ensure_frontend_dependencies
+
+        ensure_frontend_dependencies(
+            source,
+            skip=skip_frontend_install,
+            force=install_frontend,
+        )
+        npm = shutil.which("npm") or "npm"
         if not dev:
             if not node:
                 raise SystemExit("Node.js 20+ is required to run the source production build.")
@@ -1298,6 +1296,8 @@ def _launch_detached(
     *,
     dev: bool,
     open_browser: bool,
+    skip_frontend_install: bool = False,
+    install_frontend: bool = False,
 ) -> None:
     """Start a launcher outside the caller's console process group."""
 
@@ -1324,6 +1324,10 @@ def _launch_detached(
         command.append("--dev")
     if not open_browser:
         command.append("--no-browser")
+    if skip_frontend_install:
+        command.append("--skip-frontend-install")
+    if install_frontend:
+        command.append("--install-frontend")
 
     env = os.environ.copy()
     env[DEEPTUTOR_HOME_ENV] = str(runtime_home.resolve())
@@ -1523,6 +1527,8 @@ def start(
     dev: bool = False,
     detach: bool = False,
     open_browser: bool = True,
+    skip_frontend_install: bool = False,
+    install_frontend: bool = False,
 ) -> None:
     _relax_console_encoding()
     runtime_home = get_runtime_home(home)
@@ -1536,7 +1542,13 @@ def start(
     language = resolve_language()
     _ACTIVE_LABELS = labels_for(language)
     if detach:
-        _launch_detached(runtime_home, dev=dev, open_browser=open_browser)
+        _launch_detached(
+            runtime_home,
+            dev=dev,
+            open_browser=open_browser,
+            skip_frontend_install=skip_frontend_install,
+            install_frontend=install_frontend,
+        )
         return
 
     detached_token = os.getenv(DETACHED_TOKEN_ENV, "").strip()
@@ -1582,6 +1594,8 @@ def start(
         api_base=api_base,
         auth_enabled=auth_enabled,
         dev=dev,
+        skip_frontend_install=skip_frontend_install,
+        install_frontend=install_frontend,
     )
     existing_frontend = _detect_existing_source_frontend(frontend)
     if existing_frontend is not None and not _http_ready(
@@ -1620,6 +1634,8 @@ def start(
             api_base=api_base,
             auth_enabled=auth_enabled,
             dev=dev,
+            skip_frontend_install=skip_frontend_install,
+            install_frontend=install_frontend,
         )
 
     frontend_url = (

@@ -312,18 +312,16 @@ Open the URL printed in the terminal, by default [http://127.0.0.1:3782](http://
 Use **Python 3.11–3.14** and **Node.js 22 LTS** to match CI and Docker.
 
 ```bash
-git clone --branch dev https://github.com/HKUDS/DeepTutor.git
-cd DeepTutor
+git clone https://github.com/gunjanj20000/DT.git
+cd DT
 python3 -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements/full.txt
 python -m pip install -e . --no-deps
-( cd web && npm ci --legacy-peer-deps )
-deeptutor init
-deeptutor start --dev
+deeptutor start
 ```
 
-Use `deeptutor start` without `--dev` for a production build. Optional dependencies are installed from the repository root, for example `python scripts/install_extras.py dev,partners,math-animator`. See the [source installation guide](https://docs.deeptutor.info/get-started/from-source/) for Conda, extras, and troubleshooting, or the [Agent Setup guide](docs-for-dev/AGENT_SETUP.md) to let a terminal-capable agent perform and verify the setup.
+`deeptutor start` automatically detects and installs frontend dependencies (`npm ci --legacy-peer-deps`) on first launch or whenever `package-lock.json` changes. Use `--skip-frontend-install` to bypass automatic installation, or `--install-frontend` to force reinstallation. Optional dependencies are installed from the repository root, for example `python scripts/install_extras.py dev,partners,math-animator`.
 
 </details>
 
@@ -780,7 +778,7 @@ The table covers the full installation and optional add-ons; commands and capabi
 |:---|:---|
 | `deeptutor init [--non-interactive] [--home PATH]` | Run the setup wizard, or create missing defaults without prompts |
 | `deeptutor doctor [--online]` | Check whether the runtime is ready to start a session; `--online` also probes the configured model provider, `--format json` prints the report |
-| `deeptutor start [--home PATH] [--dev] [--detach] [--no-browser]` | Launch backend + frontend together; optionally detach or suppress browser opening |
+| `deeptutor start [--home PATH] [--dev] [--detach] [--no-browser] [--install-frontend] [--skip-frontend-install]` | Launch backend + frontend together; automatically installs frontend dependencies if needed |
 | `deeptutor stop [--home PATH]` | Stop a launcher started with `--detach` |
 | `deeptutor serve [--port PORT]` | Start only the FastAPI backend |
 | `deeptutor module list/install/uninstall/enable/disable` | Inspect modules and change them with DeepTutor stopped; source checkouts support enable/disable |

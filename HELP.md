@@ -75,13 +75,15 @@ python -m pip install --upgrade pip
 pip install -r requirements/full.txt
 pip install -e . --no-deps
 
-# 4. Install frontend dependencies
-cd web
-npm ci --legacy-peer-deps
-cd ..
-
-# 5. Launch DeepTutor
+# 4. Launch DeepTutor (Frontend dependencies are detected and installed automatically on first launch!)
 deeptutor start
+```
+
+> [!NOTE]
+> `deeptutor start` includes a smart frontend installer: on first run, it automatically checks Node.js & npm and installs frontend packages (`npm ci --legacy-peer-deps`). You don't need to manually `cd web`!
+> Optional flags:
+> - `deeptutor start --install-frontend` : Force reinstall frontend dependencies.
+> - `deeptutor start --skip-frontend-install` : Skip automatic frontend dependency installation.
 ```
 
 ---
@@ -104,13 +106,15 @@ python -m pip install --upgrade pip
 pip install -r requirements/full.txt
 pip install -e . --no-deps
 
-# 4. Install frontend dependencies
-cd web
-npm ci --legacy-peer-deps
-cd ..
-
-# 5. Launch DeepTutor
+# 4. Launch DeepTutor (Frontend dependencies are detected and installed automatically on first launch!)
 deeptutor start
+```
+
+> [!NOTE]
+> `deeptutor start` includes a smart frontend installer: on first run, it automatically checks Node.js & npm and installs frontend packages (`npm ci --legacy-peer-deps`). You don't need to manually `cd web`!
+> Optional flags:
+> - `deeptutor start --install-frontend` : Force reinstall frontend dependencies.
+> - `deeptutor start --skip-frontend-install` : Skip automatic frontend dependency installation.
 ```
 
 ---
@@ -224,13 +228,20 @@ Specify a different port:
 deeptutor start --port 8002
 ```
 
-### Q3: `npm ci fails with peer dependency conflict`
-**Cause**: Strict npm dependency resolution.  
+### Q3: Frontend dependency installation or Node.js missing
+**Cause**: Node.js/npm is not installed in system PATH, or npm failed during package installation.  
 **Solution**:
-Always run npm with the legacy peer deps flag:
+1. Ensure Node.js 20 LTS or 22 LTS is installed (download from [nodejs.org](https://nodejs.org/)).
+2. `deeptutor start` automatically runs `npm ci --legacy-peer-deps` on first launch or when lockfiles change. If you ever need to manually install dependencies:
 ```bash
 cd web
 npm ci --legacy-peer-deps
+cd ..
+deeptutor start
+```
+3. To force `deeptutor start` to reinstall dependencies at any time, run:
+```bash
+deeptutor start --install-frontend
 ```
 
 ### Q4: Browser rendering not detecting Chrome

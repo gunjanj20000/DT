@@ -728,7 +728,7 @@ def test_ensure_web_dependencies_runs_npm_ci_when_a_lockfile_exists(
 
     launcher._ensure_web_dependencies(source, "npm")
 
-    assert calls == [(["npm", "ci"], source)]
+    assert calls == [(["npm", "ci", "--legacy-peer-deps"], source)]
 
 
 def test_ensure_web_dependencies_falls_back_to_npm_install_without_a_lockfile(
@@ -746,7 +746,7 @@ def test_ensure_web_dependencies_falls_back_to_npm_install_without_a_lockfile(
 
     launcher._ensure_web_dependencies(source, "npm")
 
-    assert calls == [["npm", "install"]]
+    assert calls == [["npm", "install", "--legacy-peer-deps"]]
 
 
 def test_ensure_web_dependencies_is_a_no_op_once_installed(

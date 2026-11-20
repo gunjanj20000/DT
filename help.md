@@ -1,6 +1,6 @@
 # DeepTutor Installation & Setup Guide (Clean Install)
 
-This guide provides complete, step-by-step instructions to perform a **clean installation** of DeepTutor with the new **Document & Chat Export** features (PDF, Responsive EPUB, Word DOCX, and Markdown).
+This guide provides complete, step-by-step instructions to perform a **clean installation** of DeepTutor with the new **Document & Chat Export** features (PDF, Responsive EPUB, Word DOCX, and Markdown) and **Smart Frontend Installer**.
 
 ---
 
@@ -22,6 +22,11 @@ This guide provides complete, step-by-step instructions to perform a **clean ins
 
 In addition to DeepTutor's core capabilities (agentic chat, deep solve, deep research, knowledge bases, and multi-agent workflows), this build includes:
 
+- **Smart Frontend Auto-Installer**:
+  - `deeptutor start` automatically detects missing frontend dependencies and installs them seamlessly (`npm ci --legacy-peer-deps`).
+  - Automatically detects when `package-lock.json` changes and updates packages without manual intervention.
+  - Zero manual `cd web` navigation required!
+  - Supports `--skip-frontend-install` and `--install-frontend` flags.
 - **Vector PDF Export**:
   - Automatically converts Mermaid diagrams into crisp vector `<svg>` drawings.
   - Pre-renders KaTeX / LaTeX mathematical formulas with complete font metrics.
@@ -75,14 +80,15 @@ python -m pip install --upgrade pip
 pip install -r requirements/full.txt
 pip install -e . --no-deps
 
-# 4. Install frontend dependencies
-cd web
-npm ci --legacy-peer-deps
-cd ..
-
-# 5. Launch DeepTutor
+# 4. Launch DeepTutor (Frontend dependencies are detected and installed automatically on first launch!)
 deeptutor start
 ```
+
+> [!NOTE]
+> `deeptutor start` includes a smart frontend installer: on first run, it automatically checks Node.js & npm and installs frontend packages (`npm ci --legacy-peer-deps`). You don't need to manually `cd web`!
+> Optional flags:
+> - `deeptutor start --install-frontend` : Force reinstall frontend dependencies.
+> - `deeptutor start --skip-frontend-install` : Skip automatic frontend dependency installation.
 
 ---
 
@@ -104,12 +110,7 @@ python -m pip install --upgrade pip
 pip install -r requirements/full.txt
 pip install -e . --no-deps
 
-# 4. Install frontend dependencies
-cd web
-npm ci --legacy-peer-deps
-cd ..
-
-# 5. Launch DeepTutor
+# 4. Launch DeepTutor (Frontend dependencies are detected and installed automatically on first launch!)
 deeptutor start
 ```
 
@@ -224,13 +225,20 @@ Specify a different port:
 deeptutor start --port 8002
 ```
 
-### Q3: `npm ci fails with peer dependency conflict`
-**Cause**: Strict npm dependency resolution.  
+### Q3: Frontend dependency installation or Node.js missing
+**Cause**: Node.js/npm is not installed in system PATH, or npm failed during package installation.  
 **Solution**:
-Always run npm with the legacy peer deps flag:
+1. Ensure Node.js 20 LTS or 22 LTS is installed (download from [nodejs.org](https://nodejs.org/)).
+2. `deeptutor start` automatically runs `npm ci --legacy-peer-deps` on first launch or when lockfiles change. If you ever need to manually install dependencies:
 ```bash
 cd web
 npm ci --legacy-peer-deps
+cd ..
+deeptutor start
+```
+3. To force `deeptutor start` to reinstall dependencies at any time, run:
+```bash
+deeptutor start --install-frontend
 ```
 
 ### Q4: Browser rendering not detecting Chrome
@@ -246,7 +254,9 @@ Set the `CHROME_BIN` environment variable pointing directly to your browser bina
 
 | Command | Description |
 | :--- | :--- |
-| `deeptutor start` | Start both backend and frontend together |
+| `deeptutor start` | Start both backend and frontend together (auto-installs frontend dependencies) |
+| `deeptutor start --install-frontend` | Force reinstall frontend dependencies |
+| `deeptutor start --skip-frontend-install` | Skip frontend dependency check/install |
 | `deeptutor chat` | Interactive terminal REPL |
 | `deeptutor module list` | Inspect installed and enabled modules |
 | `deeptutor kb list` | List knowledge bases |

@@ -138,6 +138,16 @@ def start(
         "--open-browser/--no-browser",
         help="Open the frontend automatically after startup.",
     ),
+    skip_frontend_install: bool = typer.Option(
+        False,
+        "--skip-frontend-install",
+        help="Skip automatic frontend dependency installation.",
+    ),
+    install_frontend: bool = typer.Option(
+        False,
+        "--install-frontend",
+        help="Force frontend dependency installation.",
+    ),
 ) -> None:
     """Launch backend + frontend together. Source installs default to production."""
     from deeptutor.modules.catalog import require_module
@@ -146,7 +156,14 @@ def start(
     require_module("web")
     from deeptutor.runtime.launcher import start as start_web
 
-    start_web(home=home, dev=dev, detach=detach, open_browser=open_browser)
+    start_web(
+        home=home,
+        dev=dev,
+        detach=detach,
+        open_browser=open_browser,
+        skip_frontend_install=skip_frontend_install,
+        install_frontend=install_frontend,
+    )
 
 
 @app.command()
