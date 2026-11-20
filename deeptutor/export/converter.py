@@ -21,8 +21,6 @@ import tempfile
 from typing import Any
 import uuid
 
-import mistune
-
 logger = logging.getLogger(__name__)
 
 _VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
@@ -33,14 +31,28 @@ class ExportConversionError(Exception):
 
 
 def find_chrome_executable() -> str | None:
-    """Find a Chrome or Chromium executable on the host system."""
-    for candidate in [
+    """Find a Chrome, Chromium, or Edge executable on the host system."""
+    candidates = [
         os.environ.get("CHROME_BIN"),
         shutil.which("google-chrome"),
         shutil.which("google-chrome-stable"),
         shutil.which("chromium-browser"),
         shutil.which("chromium"),
-    ]:
+        shutil.which("chrome"),
+        shutil.which("msedge"),
+        shutil.which("microsoft-edge"),
+        shutil.which("microsoft-edge-stable"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ]
+    for candidate in candidates:
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
@@ -51,16 +63,40 @@ def _clean_title(title: str) -> str:
     return cleaned if cleaned else "DeepTutor Document"
 
 
+def _render_markdown(markdown_text: str) -> str:
+    """Render Markdown to HTML, preferring DeepTutor's built-in markdown-it-py."""
+    # 1. Prefer markdown-it-py (always installed in DeepTutor core)
+    try:
+        from markdown_it import MarkdownIt
+
+        md = MarkdownIt("commonmark").enable("table").enable("strikethrough")
+        return md.render(markdown_text or "")
+    except Exception as exc:
+        logger.debug("markdown_it render failed or not found: %s", exc)
+
+    # 2. Fallback to mistune if available
+    try:
+        import mistune
+
+        plugins = []
+        for p in ["table", "strikethrough", "footnotes", "url", "task_lists"]:
+            try:
+                plugins.append(p)
+            except Exception:
+                pass
+        md_mistune = mistune.create_markdown(plugins=plugins)
+        return md_mistune(markdown_text or "")
+    except Exception as exc:
+        logger.debug("mistune render failed or not found: %s", exc)
+
+    # 3. Plain text fallback
+    escaped = html.escape(markdown_text or "")
+    return f"<pre style='white-space: pre-wrap; font-family: inherit;'>{escaped}</pre>"
+
+
 def _markdown_to_html_body(markdown_text: str) -> str:
-    """Parse Markdown to HTML using mistune and transform rich blocks."""
-    plugins = []
-    for p in ["table", "strikethrough", "footnotes", "url", "task_lists"]:
-        try:
-            plugins.append(p)
-        except Exception:
-            pass
-    md = mistune.create_markdown(plugins=plugins)
-    raw_html = md(markdown_text or "")
+    """Parse Markdown to HTML and transform rich blocks."""
+    raw_html = _render_markdown(markdown_text or "")
 
     # 1. Transform mermaid code blocks to <div class="mermaid">
     def _replace_mermaid(match: re.Match) -> str:
@@ -507,6 +543,235 @@ def markdown_to_pdf(markdown_text: str, title: str = "Document") -> bytes:
         return pdf_file.read_bytes()
 
 
+def _build_epub_zip(
+    title: str,
+    language: str,
+    body_html: str,
+    css: str,
+    images: list[tuple[str, str, bytes]],
+) -> bytes:
+    """Build a valid EPUB 3 zip archive using only Python's standard library."""
+    import io
+    import zipfile
+    from datetime import datetime, timezone
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("mimetype", b"application/epub+zip", compress_type=zipfile.ZIP_STORED)
+
+        container_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"""
+        zf.writestr("META-INF/container.xml", container_xml, compress_type=zipfile.ZIP_DEFLATED)
+
+        book_id = f"urn:uuid:{uuid.uuid4()}"
+        iso_now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        image_manifest = []
+        for img_id, img_name, _ in images:
+            mime = "image/png"
+            if img_name.endswith(".jpg") or img_name.endswith(".jpeg"):
+                mime = "image/jpeg"
+            elif img_name.endswith(".svg"):
+                mime = "image/svg+xml"
+            image_manifest.append(f'<item id="{img_id}" href="{img_name}" media-type="{mime}"/>')
+
+        manifest_str = "\n    ".join(image_manifest)
+        opf = f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookID" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>{html.escape(title)}</dc:title>
+    <dc:language>{language}</dc:language>
+    <dc:identifier id="BookID">{book_id}</dc:identifier>
+    <dc:creator>DeepTutor</dc:creator>
+    <meta property="dcterms:modified">{iso_now}</meta>
+  </metadata>
+  <manifest>
+    <item id="style" href="style/nav.css" media-type="text/css"/>
+    <item id="chapter1" href="chapter_1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    {manifest_str}
+  </manifest>
+  <spine toc="toc">
+    <itemref idref="chapter1"/>
+  </spine>
+</package>"""
+        zf.writestr("OEBPS/content.opf", opf, compress_type=zipfile.ZIP_DEFLATED)
+
+        ncx = f"""<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="{book_id}"/>
+    <meta name="dtb:depth" content="1"/>
+  </head>
+  <docTitle><text>{html.escape(title)}</text></docTitle>
+  <navMap>
+    <navPoint id="navpoint-1" playOrder="1">
+      <navLabel><text>{html.escape(title)}</text></navLabel>
+      <content src="chapter_1.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>"""
+        zf.writestr("OEBPS/toc.ncx", ncx, compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr("OEBPS/style/nav.css", css, compress_type=zipfile.ZIP_DEFLATED)
+
+        xhtml = f"""<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <title>{html.escape(title)}</title>
+  <link rel="stylesheet" type="text/css" href="style/nav.css" />
+</head>
+<body>
+  <h1>{html.escape(title)}</h1>
+  {body_html}
+</body>
+</html>"""
+        zf.writestr("OEBPS/chapter_1.xhtml", xhtml, compress_type=zipfile.ZIP_DEFLATED)
+
+        for _, img_name, img_bytes in images:
+            zf.writestr(f"OEBPS/{img_name}", img_bytes, compress_type=zipfile.ZIP_DEFLATED)
+
+    return buf.getvalue()
+
+
+_RESPONSIVE_EPUB_CSS = """
+@namespace epub "http://www.idpf.org/2007/ops";
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  color: #1f2937;
+  padding: 4%;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: #111827;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+  page-break-after: avoid;
+}
+
+h1 { font-size: 1.85em; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.3em; }
+h2 { font-size: 1.45em; border-bottom: 1px solid #f3f4f6; padding-bottom: 0.25em; }
+h3 { font-size: 1.25em; }
+
+p, ul, ol {
+  margin: 0.8em 0;
+  font-size: 1em;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5em 0;
+  font-size: 0.9em;
+  overflow-x: auto;
+  display: block;
+}
+
+th, td {
+  border: 1px solid #d1d5db;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+th {
+  background-color: #f3f4f6;
+  font-weight: 600;
+  color: #111827;
+}
+
+blockquote {
+  border-left: 4px solid #2563eb;
+  padding: 8px 16px;
+  margin: 1.2em 0;
+  background-color: #f8fafc;
+  color: #334155;
+  border-radius: 0 6px 6px 0;
+}
+
+blockquote.callout-tip {
+  border-left-color: #10b981;
+  background-color: #ecfdf5;
+}
+
+blockquote.callout-warning {
+  border-left-color: #f59e0b;
+  background-color: #fffbeb;
+}
+
+blockquote.callout-caution {
+  border-left-color: #ef4444;
+  background-color: #fef2f2;
+}
+
+.callout-title {
+  font-weight: 700;
+  font-size: 0.85em;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+pre, code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  background-color: #f3f4f6;
+  border-radius: 4px;
+}
+
+code {
+  padding: 2px 5px;
+}
+
+pre {
+  padding: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+img, svg {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 1.5em auto;
+}
+
+.diagram-container {
+  width: 100%;
+  overflow-x: auto;
+  margin: 1.5em 0;
+  text-align: center;
+}
+
+.katex {
+  font-size: 1.05em;
+  line-height: 1.2;
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5em 0;
+  margin: 1em 0;
+}
+
+@media screen and (max-width: 600px) {
+  body { padding: 3% 2%; }
+  h1 { font-size: 1.45em; }
+  h2 { font-size: 1.2em; }
+  th, td { padding: 4px 6px; font-size: 0.8em; }
+  pre { padding: 8px; font-size: 0.8em; }
+}
+"""
+
+
 def markdown_to_epub(
     markdown_text: str,
     title: str = "Document",
@@ -560,10 +825,10 @@ def markdown_to_epub(
         try:
             import ebooklib
             from ebooklib import epub
-        except ImportError as exc:
-            raise ExportConversionError(
-                "EPUB export requires 'ebooklib'. Please install it using: pip install ebooklib"
-            ) from exc
+        except ImportError:
+            ebooklib = None
+            epub = None
+            logger.info("ebooklib not installed; using built-in EPUB packager.")
 
         try:
             import bs4
@@ -578,146 +843,15 @@ def markdown_to_epub(
             logger.info("beautifulsoup4 not installed; using regex parser for EPUB.")
 
         # Setup EbookLib EpubBook
-        book = epub.EpubBook()
-        book.set_identifier(f"urn:uuid:{uuid.uuid4()}")
-        book.set_title(clean_title)
-        book.set_language(language)
-        book.add_author("DeepTutor")
+        book = None
+        if epub is not None:
+            book = epub.EpubBook()
+            book.set_identifier(f"urn:uuid:{uuid.uuid4()}")
+            book.set_title(clean_title)
+            book.set_language(language)
+            book.add_author("DeepTutor")
 
-        # Responsive EPUB CSS for all screen sizes (smartphones, tablets, e-readers)
-        epub_css = epub.EpubItem(
-            uid="style_nav",
-            file_name="style/nav.css",
-            media_type="text/css",
-            content="""
-@namespace epub "http://www.idpf.org/2007/ops";
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.6;
-  color: #1f2937;
-  padding: 4%;
-  margin: 0;
-  box-sizing: border-box;
-}
-
-h1, h2, h3, h4, h5, h6 {
-  color: #111827;
-  font-weight: 600;
-  line-height: 1.3;
-  margin-top: 1.4em;
-  margin-bottom: 0.5em;
-  page-break-after: avoid;
-}
-
-h1 { font-size: 1.7em; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
-h2 { font-size: 1.4em; }
-h3 { font-size: 1.2em; }
-
-p { margin: 0.7em 0; word-break: break-word; }
-
-/* Responsive SVGs & Diagrams */
-svg {
-  max-width: 100% !important;
-  height: auto !important;
-  display: block;
-  margin: 1em auto;
-}
-
-.diagram-container, .mermaid-container, .chart-container {
-  width: 100%;
-  max-width: 100%;
-  overflow-x: auto;
-  text-align: center;
-  margin: 1.5em 0;
-  box-sizing: border-box;
-}
-
-img {
-  max-width: 100% !important;
-  height: auto !important;
-  display: block;
-  margin: 1em auto;
-}
-
-/* Responsive Table */
-.table-container {
-  width: 100%;
-  max-width: 100%;
-  overflow-x: auto;
-  margin: 1.2em 0;
-  display: block;
-}
-
-table {
-  width: 100%;
-  max-width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9em;
-  margin: 1em 0;
-}
-
-th, td {
-  border: 1px solid #d1d5db;
-  padding: 6px 10px;
-  text-align: left;
-  word-break: break-word;
-}
-
-th {
-  background-color: #f3f4f6;
-  font-weight: 600;
-}
-
-tr:nth-child(even) {
-  background-color: #f9fafb;
-}
-
-/* Code Blocks */
-pre {
-  background-color: #f3f4f6;
-  border-radius: 6px;
-  padding: 10px 14px;
-  overflow-x: auto;
-  font-family: monospace;
-  font-size: 0.85em;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-code {
-  font-family: monospace;
-  font-size: 0.88em;
-  background-color: #f3f4f6;
-  padding: 2px 4px;
-  border-radius: 3px;
-}
-
-/* Callouts */
-blockquote {
-  margin: 1.2em 0;
-  padding: 10px 14px;
-  background-color: #f9fafb;
-  border-left: 4px solid #3b82f6;
-  border-radius: 0 4px 4px 0;
-  color: #4b5563;
-}
-
-/* Smartphone & Narrow Screen Media Query */
-@media screen and (max-width: 480px) {
-  body {
-    padding: 2%;
-    font-size: 14px;
-  }
-  h1 { font-size: 1.4em; }
-  h2 { font-size: 1.2em; }
-  th, td { padding: 4px 6px; font-size: 0.8em; }
-  pre { padding: 8px; font-size: 0.8em; }
-}
-""",
-        )
-        book.add_item(epub_css)
+        images_data: list[tuple[str, str, bytes]] = []
 
         if soup is not None:
             # Extract base64 inline images and package as EPUB image items
@@ -736,13 +870,7 @@ blockquote {
                         img_counter += 1
                         img_filename = f"images/fig_{img_counter}.{ext}"
                         raw_bytes = base64.b64decode(b64_data)
-                        epub_img = epub.EpubImage(
-                            uid=f"img_{img_counter}",
-                            file_name=img_filename,
-                            media_type=mime_type,
-                            content=raw_bytes,
-                        )
-                        book.add_item(epub_img)
+                        images_data.append((f"img_{img_counter}", img_filename, raw_bytes))
                         img["src"] = img_filename
                     except Exception as err:
                         logger.warning("Could not extract data URL image: %s", err)
@@ -761,16 +889,58 @@ blockquote {
             # Regex fallback when BeautifulSoup is absent
             cleaned = re.sub(r"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>", "", rendered_html, flags=re.IGNORECASE)
             cleaned = re.sub(r"<link\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
-            cleaned = re.sub(r"<header class=\"document-header\"[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"<header class=['\"]document-header['\"][^<]*(?:(?!<\/header>)<[^<]*)*<\/header>", "", cleaned, flags=re.IGNORECASE)
+
+            img_idx = 0
+
+            def _extract_b64_img(m: re.Match) -> str:
+                nonlocal img_idx
+                mime = m.group(1)
+                b64 = m.group(2)
+                ext = "jpg" if ("jpeg" in mime or "jpg" in mime) else ("svg" if "svg" in mime else "png")
+                img_idx += 1
+                fname = f"images/fig_{img_idx}.{ext}"
+                try:
+                    images_data.append((f"img_{img_idx}", fname, base64.b64decode(b64)))
+                    return f'<img src="{fname}" style="max-width: 100%; height: auto;"'
+                except Exception:
+                    return m.group(0)
+
+            cleaned = re.sub(r'<img\b[^>]*src="data:image\/([a-zA-Z0-9+]+);base64,([a-zA-Z0-9+/=]+)"', _extract_b64_img, cleaned)
             main_match = re.search(r"<(?:main|body)[^>]*>(.*?)<\/(?:main|body)>", cleaned, flags=re.DOTALL | re.IGNORECASE)
             body_inner_html = main_match.group(1) if main_match else cleaned
 
-        chapter = epub.EpubHtml(
-            title=clean_title,
-            file_name="chapter_1.xhtml",
-            lang=language,
-        )
-        chapter.content = f"""<!DOCTYPE html>
+        # If ebooklib is installed, use it; otherwise use built-in standard-library packager
+        if epub is not None and book is not None:
+            try:
+                epub_css = epub.EpubItem(
+                    uid="style_nav",
+                    file_name="style/nav.css",
+                    media_type="text/css",
+                    content=_RESPONSIVE_EPUB_CSS,
+                )
+                book.add_item(epub_css)
+
+                for img_id, img_name, img_bytes in images_data:
+                    mime = "image/png"
+                    if img_name.endswith(".jpg") or img_name.endswith(".jpeg"):
+                        mime = "image/jpeg"
+                    elif img_name.endswith(".svg"):
+                        mime = "image/svg+xml"
+                    epub_img = epub.EpubImage(
+                        uid=img_id,
+                        file_name=img_name,
+                        media_type=mime,
+                        content=img_bytes,
+                    )
+                    book.add_item(epub_img)
+
+                chapter = epub.EpubHtml(
+                    title=clean_title,
+                    file_name="chapter_1.xhtml",
+                    lang=language,
+                )
+                chapter.content = f"""<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head>
   <title>{html.escape(clean_title)}</title>
@@ -781,20 +951,18 @@ blockquote {
   {body_inner_html}
 </body>
 </html>"""
-        book.add_item(chapter)
+                book.add_item(chapter)
+                book.toc = (epub.Link("chapter_1.xhtml", clean_title, "chap_1"),)
+                book.add_item(epub.EpubNcx())
+                book.add_item(epub.EpubNav())
+                book.spine = ["nav", chapter]
 
-        # Table of contents and Spine
-        book.toc = (epub.Link("chapter_1.xhtml", clean_title, "chap_1"),)
-        book.add_item(epub.EpubNcx())
-        book.add_item(epub.EpubNav())
-        book.spine = ["nav", chapter]
+                epub.write_epub(str(epub_file.resolve()), book)
+                return epub_file.read_bytes()
+            except Exception as exc:
+                logger.warning("ebooklib write failed (%s); using built-in packager.", exc)
 
-        try:
-            epub.write_epub(str(epub_file.resolve()), book)
-        except Exception as exc:
-            raise ExportConversionError(f"Failed to generate EPUB archive: {exc}") from exc
-
-        return epub_file.read_bytes()
+        return _build_epub_zip(clean_title, language, body_inner_html, _RESPONSIVE_EPUB_CSS, images_data)
 
 
 def _fallback_reportlab_pdf(markdown_text: str, title: str) -> bytes:
