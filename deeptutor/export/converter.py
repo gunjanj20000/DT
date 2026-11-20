@@ -21,9 +21,6 @@ import tempfile
 from typing import Any
 import uuid
 
-import bs4
-import ebooklib
-from ebooklib import epub
 import mistune
 
 logger = logging.getLogger(__name__)
@@ -560,17 +557,25 @@ def markdown_to_epub(
         if not rendered_html:
             rendered_html = html_content
 
-        # Parse DOM with BeautifulSoup to clean up and extract images
-        soup = bs4.BeautifulSoup(rendered_html, "html.parser")
+        try:
+            import ebooklib
+            from ebooklib import epub
+        except ImportError as exc:
+            raise ExportConversionError(
+                "EPUB export requires 'ebooklib'. Please install it using: pip install ebooklib"
+            ) from exc
 
-        # Remove <script> and local <link> tags from EPUB body
-        for tag in soup.find_all(["script", "link"]):
-            tag.decompose()
-
-        # Remove outer document-wrapper header if redundant
-        doc_header = soup.find("header", class_="document-header")
-        if doc_header:
-            doc_header.decompose()
+        try:
+            import bs4
+            soup = bs4.BeautifulSoup(rendered_html, "html.parser")
+            for tag in soup.find_all(["script", "link"]):
+                tag.decompose()
+            doc_header = soup.find("header", class_="document-header")
+            if doc_header:
+                doc_header.decompose()
+        except ImportError:
+            soup = None
+            logger.info("beautifulsoup4 not installed; using regex parser for EPUB.")
 
         # Setup EbookLib EpubBook
         book = epub.EpubBook()
@@ -714,43 +719,51 @@ blockquote {
         )
         book.add_item(epub_css)
 
-        # Extract base64 inline images and package as EPUB image items
-        img_counter = 0
-        for img in soup.find_all("img"):
-            src = img.get("src", "")
-            if src.startswith("data:image/"):
-                try:
-                    meta, b64_data = src.split(",", 1)
-                    mime_type = meta.split(";")[0].replace("data:", "")
-                    ext = "png"
-                    if "jpeg" in mime_type or "jpg" in mime_type:
-                        ext = "jpg"
-                    elif "svg" in mime_type:
-                        ext = "svg"
-                    img_counter += 1
-                    img_filename = f"images/fig_{img_counter}.{ext}"
-                    raw_bytes = base64.b64decode(b64_data)
-                    epub_img = epub.EpubImage(
-                        uid=f"img_{img_counter}",
-                        file_name=img_filename,
-                        media_type=mime_type,
-                        content=raw_bytes,
-                    )
-                    book.add_item(epub_img)
-                    img["src"] = img_filename
-                except Exception as err:
-                    logger.warning("Could not extract data URL image: %s", err)
+        if soup is not None:
+            # Extract base64 inline images and package as EPUB image items
+            img_counter = 0
+            for img in soup.find_all("img"):
+                src = img.get("src", "")
+                if src.startswith("data:image/"):
+                    try:
+                        meta, b64_data = src.split(",", 1)
+                        mime_type = meta.split(";")[0].replace("data:", "")
+                        ext = "png"
+                        if "jpeg" in mime_type or "jpg" in mime_type:
+                            ext = "jpg"
+                        elif "svg" in mime_type:
+                            ext = "svg"
+                        img_counter += 1
+                        img_filename = f"images/fig_{img_counter}.{ext}"
+                        raw_bytes = base64.b64decode(b64_data)
+                        epub_img = epub.EpubImage(
+                            uid=f"img_{img_counter}",
+                            file_name=img_filename,
+                            media_type=mime_type,
+                            content=raw_bytes,
+                        )
+                        book.add_item(epub_img)
+                        img["src"] = img_filename
+                    except Exception as err:
+                        logger.warning("Could not extract data URL image: %s", err)
 
-        # Ensure all SVGs are responsive
-        for svg in soup.find_all("svg"):
-            svg["style"] = "max-width: 100%; height: auto;"
-            if not svg.parent or "diagram-container" not in (svg.parent.get("class") or []):
-                wrapper = soup.new_tag("div", attrs={"class": "diagram-container"})
-                svg.wrap(wrapper)
+            # Ensure all SVGs are responsive
+            for svg in soup.find_all("svg"):
+                svg["style"] = "max-width: 100%; height: auto;"
+                if not svg.parent or "diagram-container" not in (svg.parent.get("class") or []):
+                    wrapper = soup.new_tag("div", attrs={"class": "diagram-container"})
+                    svg.wrap(wrapper)
 
-        # Build clean chapter content
-        body_node = soup.find("main") or soup.find("body") or soup
-        body_inner_html = "".join(str(c) for c in body_node.children)
+            # Build clean chapter content
+            body_node = soup.find("main") or soup.find("body") or soup
+            body_inner_html = "".join(str(c) for c in body_node.children)
+        else:
+            # Regex fallback when BeautifulSoup is absent
+            cleaned = re.sub(r"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>", "", rendered_html, flags=re.IGNORECASE)
+            cleaned = re.sub(r"<link\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"<header class=\"document-header\"[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>", "", cleaned, flags=re.IGNORECASE)
+            main_match = re.search(r"<(?:main|body)[^>]*>(.*?)<\/(?:main|body)>", cleaned, flags=re.DOTALL | re.IGNORECASE)
+            body_inner_html = main_match.group(1) if main_match else cleaned
 
         chapter = epub.EpubHtml(
             title=clean_title,
