@@ -132,24 +132,30 @@ def _serialise_definition(
     return definition.name, definition.description, params
 
 
-def _serialise_hints(hints: ToolPromptHints) -> ToolHintsPayload:
+def _serialise_hints(hints: ToolPromptHints | str | None) -> ToolHintsPayload:
+    if hints is None:
+        return ToolHintsPayload()
+    if isinstance(hints, str):
+        return ToolHintsPayload(short_description=hints)
+    raw_aliases = getattr(hints, "aliases", None) or []
+    aliases = [
+        ToolAliasPayload(
+            name=getattr(alias, "name", ""),
+            description=getattr(alias, "description", ""),
+            input_format=getattr(alias, "input_format", ""),
+            when_to_use=getattr(alias, "when_to_use", ""),
+            phase=getattr(alias, "phase", ""),
+        )
+        for alias in raw_aliases
+    ]
     return ToolHintsPayload(
-        short_description=hints.short_description,
-        when_to_use=hints.when_to_use,
-        input_format=hints.input_format,
-        guideline=hints.guideline,
-        note=hints.note,
-        phase=hints.phase,
-        aliases=[
-            ToolAliasPayload(
-                name=alias.name,
-                description=alias.description,
-                input_format=alias.input_format,
-                when_to_use=alias.when_to_use,
-                phase=alias.phase,
-            )
-            for alias in hints.aliases
-        ],
+        short_description=getattr(hints, "short_description", "") or "",
+        when_to_use=getattr(hints, "when_to_use", "") or "",
+        input_format=getattr(hints, "input_format", "") or "",
+        guideline=getattr(hints, "guideline", "") or "",
+        note=getattr(hints, "note", "") or "",
+        phase=getattr(hints, "phase", "") or "",
+        aliases=aliases,
     )
 
 

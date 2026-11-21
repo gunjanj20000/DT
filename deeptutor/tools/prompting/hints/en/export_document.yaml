@@ -1,0 +1,7 @@
+short_description: "Export markdown content, notes, explanations, or reports into beautifully formatted PDF or screen-responsive EPUB files."
+when_to_use: "Use when the user asks to export, download, convert, or save any content, document, notes, chat response, or explanation as a PDF or EPUB file."
+input_format: |
+  {"content": "Full markdown text to format and export", "format": "pdf", "title": "Optional document title", "language": "en"}
+guideline: "Preserves all formatting, Mermaid diagrams, Chart.js visualizations, LaTeX formulas, and tables. Choose 'pdf' for vector printable documents or 'epub' for responsive e-reader files."
+note: "The exported file will be saved to the workspace and a download link provided to the user."
+phase: "responding"

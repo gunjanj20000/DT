@@ -18,6 +18,7 @@ from deeptutor.core.tool_protocol import (
     BaseTool,
     ToolDefinition,
     ToolParameter,
+    ToolPromptHints,
     ToolResult,
 )
 from deeptutor.export.converter import (
@@ -61,10 +62,25 @@ def _run_dir(injected: str | None, *, workspace_id: str = "") -> tuple[Path, str
 class ExportDocumentTool(BaseTool):
     """Export markdown text, answers, or notes into PDF or screen-responsive EPUB files."""
 
-    def get_prompt_hints(self, language: str = "en") -> str:
+    def get_prompt_hints(self, language: str = "en") -> ToolPromptHints:
+        try:
+            from deeptutor.tools.prompting import load_prompt_hints
+
+            hints = load_prompt_hints(self.name, language=language)
+            if hints.short_description:
+                return hints
+        except Exception:
+            pass
+
         if str(language).lower().startswith("zh"):
-            return "将 Markdown 内容、笔记或解答导出为精美排版的 PDF 或响应式 EPUB 文件（完美保留 Mermaid 图表、Chart.js 图表、LaTeX 公式及表格）。"
-        return "Export markdown notes, answers, or reports into beautifully formatted PDF or screen-responsive EPUB files, preserving Mermaid diagrams, charts, LaTeX math, and tables."
+            return ToolPromptHints(
+                short_description="将 Markdown 内容、笔记或解答导出为精美排版的 PDF 或响应式 EPUB 文件（完美保留 Mermaid 图表、Chart.js 图表、LaTeX 公式及表格）。",
+                when_to_use="当用户要求将内容导出、下载或保存为 PDF 或 EPUB 电子书时调用此工具。",
+            )
+        return ToolPromptHints(
+            short_description="Export markdown notes, answers, or reports into beautifully formatted PDF or screen-responsive EPUB files, preserving Mermaid diagrams, charts, LaTeX math, and tables.",
+            when_to_use="Use when the user asks to export, download, or save explanations, notes, or solutions as PDF or EPUB format.",
+        )
 
     def get_definition(self) -> ToolDefinition:
         return ToolDefinition(

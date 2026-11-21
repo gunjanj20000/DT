@@ -99,8 +99,11 @@ const nextConfig = {
 
   // Build/typecheck wrappers can point Next at a process-local config so a
   // production build never rewrites the tsconfig watched by a live dev server.
+  // Skipping build-time typecheck and linting dramatically speeds up `deeptutor start`
+  // (independent verification is handled via `npm run typecheck` / `npm run check:fast`).
   typescript: {
     tsconfigPath: process.env.DEEPTUTOR_NEXT_TSCONFIG || "tsconfig.json",
+    ignoreBuildErrors: true,
   },
 
   // Expose the build-time version to the browser so the sidebar badge

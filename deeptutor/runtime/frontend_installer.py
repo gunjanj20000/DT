@@ -366,6 +366,12 @@ def ensure_frontend_dependencies(
         status.npm_path or ""
     ).lower().endswith((".cmd", ".bat"))
 
+    # Faster npm installation: disable audit, funding, and update notifier checks
+    env = os.environ.copy()
+    env["npm_config_audit"] = "false"
+    env["npm_config_fund"] = "false"
+    env["npm_config_update_notifier"] = "false"
+
     kwargs = _no_window_kwargs()
     try:
         result = subprocess.run(
@@ -373,6 +379,7 @@ def ensure_frontend_dependencies(
             cwd=web_dir,
             shell=use_shell,
             check=False,
+            env=env,
             **kwargs,
         )
     except Exception as exc:
