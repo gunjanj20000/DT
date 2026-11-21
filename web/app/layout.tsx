@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Lora } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import "@/features/ui-layout/classic/classic.css";
 import "@/features/ui-layout/modern/modern.css";
@@ -11,18 +11,32 @@ import { WorkspaceNavigation } from "@/components/workspaces/WorkspaceNavigation
 import { AppShellProvider } from "@/context/AppShellContext";
 import { I18nClientBridge } from "@/i18n/I18nClientBridge";
 
-// Geist matches the public site (deeptutor.info) and stays crisp at the
-// small UI sizes the composer/toolbars use, unlike the rounder Jakarta.
-const fontSans = Geist({
-  subsets: ["latin"],
+// Self-hosted fonts provide 100% offline reliability without build-time network calls to fonts.gstatic.com.
+// Geist matches the public site (deeptutor.info) and stays crisp at small UI sizes.
+const fontSans = localFont({
+  src: "./fonts/geist-latin.woff2",
   display: "swap",
   variable: "--font-sans",
+  weight: "100 900",
+  fallback: ["system-ui", "sans-serif"],
 });
 
-const fontSerif = Lora({
-  subsets: ["latin"],
+const fontSerif = localFont({
+  src: [
+    {
+      path: "./fonts/lora-latin.woff2",
+      weight: "400 700",
+      style: "normal",
+    },
+    {
+      path: "./fonts/lora-italic-latin.woff2",
+      weight: "400 700",
+      style: "italic",
+    },
+  ],
   display: "swap",
   variable: "--font-serif",
+  fallback: ["Georgia", "serif"],
 });
 
 export const viewport: Viewport = { interactiveWidget: "resizes-content" };
